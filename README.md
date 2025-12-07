@@ -169,12 +169,17 @@ Good luck.
 
 Section 5 Answer: 
 ## Stripe Answer :
-When the user needs to pay the application fee, I will first create a row in the
-payment_requests table with the amount and link it to the correct application.
-Next, I will create a Stripe Checkout Session and store the session_id in the same
-record. The user will be redirected to the Stripe payment page to complete the
-transaction.
-After payment, Stripe will send a webhook event to our backend. In this webhook
-handler, I will verify the event, update the payment_requests row to "paid", and
-then update the application’s stage or status to show that the fee has been
-successfully completed. This keeps both the payment and application workflow in sync.
+When the user needs to pay the application fee, I will first create a new entry in
+the payment_requests table with the amount, the application_id, and a status of
+pending. This helps us track that a payment is expected.
+Next, I will generate a Stripe Checkout Session and store the session_id inside
+the same payment_request row so we can match the Stripe payment with our system.
+The user will then be redirected to the Stripe Checkout page to finish the payment.
+
+After the user pays successfully, Stripe will send a webhook event to our backend.
+In this webhook handler I will verify the event using Stripes signature to make
+sure the notification is genuine. Once verified, I will update the payment_requests
+row to paid so the system knows the fee has been received.
+I will then update the applications stage or timeline to reflect that the payment
+step is completed and move the student to the next stage.
+This keeps the payment flow and the application workflow properly in sync.

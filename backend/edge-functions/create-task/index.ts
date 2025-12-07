@@ -35,6 +35,29 @@ serve(async (req: Request) => {
     // - check task_type in VALID_TYPES
     // - parse due_at and ensure it's in the future
 
+    if (!application_id || !task_type || !due_at) {
+      return new Response(
+        JSON.stringify({ error: "Missing required fields: application_id, task_type, due_at" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!VALID_TYPES.includes(task_type)) {
+      return new Response(
+        JSON.stringify({ error: `Invalid task_type. Must be one of: ${VALID_TYPES.join(', ')}` }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const dueDate = new Date(due_at);
+    const now = new Date();
+    if (isNaN(dueDate.getTime()) || dueDate <= now) {
+      return new Response(
+        JSON.stringify({ error: "due_at must be a valid future timestamp." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+
     // TODO: insert into tasks table using supabase client
 
     // Example:
@@ -43,7 +66,39 @@ serve(async (req: Request) => {
     //   .insert({ ... })
     //   .select()
     //   .single();
+    const { data: appData, error: appError } = await supabase
+      .from("applications")
+      .select("tenant_id")
+      .eq("id", application_id)
+      .single();
 
+    if (appError || !appData) {
+      return new Response(
+        JSON.stringify({ error: "Application not found or invalid ID." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert({
+        tenant_id: appData.tenant_id,
+        application_id: application_id,
+        type: task_type, // Map 'task_type' input to 'type' column
+        due_at: due_at,
+        status: "open",
+        title: `${task_type} task` // Optional: provide a default title
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Insert Error:", error);
+      return new Response(
+        JSON.stringify({ error: "Failed to create task." }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
     // TODO: handle error and return appropriate status code
 
     // Example successful response:
@@ -51,11 +106,30 @@ serve(async (req: Request) => {
     //   status: 200,
     //   headers: { "Content-Type": "application/json" },
     // });
+    await new Promise<void>((resolve) => {
+      const channel = supabase.channel('task.created');
+      
+      channel.subscribe(async (status) => {
+        
+        if (status === 'SUBSCRIBED') {
+          await channel.send({
+            type: 'broadcast',
+            event: 'task.created',
+            payload: { task_id: data.id, application_id, task_type },
+          });
+          
+          
+          supabase.removeChannel(channel);
+          resolve();
+        }
+      });
+    });
 
     return new Response(
-      JSON.stringify({ error: "Not implemented. Please complete this function." }),
-      { status: 501, headers: { "Content-Type": "application/json" } },
+      JSON.stringify({ success: true, task_id: data.id }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
     );
+
   } catch (err) {
     console.error(err);
     return new Response(JSON.stringify({ error: "Internal server error" }), {
